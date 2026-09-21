@@ -253,6 +253,25 @@ def validate_regex(
         raise click.BadParameter(f"Not a valid regular expression: {e}") from None
 
 
+class WorkerCountParamType(click.ParamType):
+    """Click parameter type delegating to the shared worker count validation."""
+
+    name = "integer range"
+
+    def convert(
+        self,
+        value: Any,
+        param: click.Parameter | None,
+        ctx: click.Context | None,
+    ) -> int:
+        from black.concurrency import validate_num_workers
+
+        try:
+            return validate_num_workers(value)
+        except ValueError as e:
+            self.fail(str(e), param, ctx)
+
+
 @click.command(
     context_settings={"help_option_names": ["-h", "--help"]},
     # While Click does set this field automatically using the docstring, mypyc
@@ -468,7 +487,7 @@ def validate_regex(
 @click.option(
     "-W",
     "--workers",
-    type=click.IntRange(min=1),
+    type=WorkerCountParamType(),
     default=None,
     help=(
         "When Black formats multiple files, it may use a process pool to speed up"
@@ -741,15 +760,18 @@ def main(
             if lines:
                 err("Cannot use --line-ranges to format multiple files.")
                 ctx.exit(1)
-            reformat_many(
-                sources=sources,
-                fast=fast,
-                write_back=write_back,
-                mode=mode,
-                report=report,
-                workers=workers,
-                no_cache=no_cache,
-            )
+            try:
+                reformat_many(
+                    sources=sources,
+                    fast=fast,
+                    write_back=write_back,
+                    mode=mode,
+                    report=report,
+                    workers=workers,
+                    no_cache=no_cache,
+                )
+            except ValueError as e:
+                ctx.fail(f"Invalid value for BLACK_NUM_WORKERS: {e}")
 
     if verbose or not quiet:
         if code is None and (verbose or report.change_count or report.failure_count):

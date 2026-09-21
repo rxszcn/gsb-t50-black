@@ -54,6 +54,21 @@ def cancel(tasks: Iterable[asyncio.Future[Any]]) -> None:
         task.cancel()
 
 
+def validate_num_workers(value: str | int) -> int:
+    """Validate a worker count given via --workers, the config file, or
+    the BLACK_NUM_WORKERS environment variable.
+
+    Returns the worker count on success and raises ValueError otherwise.
+    """
+    try:
+        workers = int(value)
+    except (TypeError, ValueError):
+        raise ValueError(f"{value!r} is not a valid integer range.") from None
+    if workers < 1:
+        raise ValueError(f"{workers} is not in the range x>=1.")
+    return workers
+
+
 def shutdown(loop: asyncio.AbstractEventLoop) -> None:
     """Cancel all pending tasks on `loop`, wait for them, and close the loop."""
     try:
@@ -89,8 +104,11 @@ def reformat_many(
     """Reformat multiple files using a ProcessPoolExecutor."""
 
     if workers is None:
-        workers = int(os.environ.get("BLACK_NUM_WORKERS", 0))
-        workers = workers or os.cpu_count() or 1
+        env_workers = os.environ.get("BLACK_NUM_WORKERS")
+        if env_workers is None:
+            workers = os.cpu_count() or 1
+        else:
+            workers = validate_num_workers(env_workers)
     if sys.platform == "win32":
         # Work around https://bugs.python.org/issue26903
         workers = min(workers, 60)
