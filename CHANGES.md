@@ -1,5 +1,13 @@
 # Change Log
 
+## Unreleased
+
+### Fixes
+
+- Reject invalid `BLACK_NUM_WORKERS` environment variable values (non-integers,
+  zero, and negative numbers) with the same clean error and exit code as
+  `--workers`, instead of raising a traceback or silently ignoring the value
+
 ## Version 26.5.1
 
 ### Stable style

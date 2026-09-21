@@ -1404,6 +1404,70 @@ class BlackTestCase(BlackBaseTestCase):
         for option in ["--include", "--exclude", "--extend-exclude", "--force-exclude"]:
             self.invokeBlack(["-", option, "**()(!!*)"], exit_code=2)
 
+    def test_workers_cli_validation(self) -> None:
+        """The CLI channel keeps its established error wording and exit code."""
+        for bad in ["abc", "1.5"]:
+            result = BlackRunner().invoke(
+                black.main, ["--workers", bad, "-c", "x=1\n"], catch_exceptions=False
+            )
+            self.assertEqual(result.exit_code, 2)
+            self.assertIn(f"'{bad}' is not a valid integer range.", result.output)
+        result = BlackRunner().invoke(
+            black.main, ["--workers", "0", "-c", "x=1\n"], catch_exceptions=False
+        )
+        self.assertEqual(result.exit_code, 2)
+        self.assertIn("0 is not in the range x>=1.", result.output)
+
+    def test_workers_env_validation(self) -> None:
+        """Invalid BLACK_NUM_WORKERS values fail like the CLI (rc=2, no traceback)."""
+        with TemporaryDirectory() as td:
+            (Path(td) / "f1.py").write_text("x = 1\n", encoding="utf-8")
+            (Path(td) / "f2.py").write_text("y = 2\n", encoding="utf-8")
+            for bad in ["abc", "1.5", "0", "-1"]:
+                runner = BlackRunner()
+                with patch.dict(os.environ, {"BLACK_NUM_WORKERS": bad}):
+                    result = runner.invoke(
+                        black.main,
+                        ["--no-cache", "--check", td],
+                        catch_exceptions=False,
+                    )
+                self.assertEqual(result.exit_code, 2, msg=result.output)
+                self.assertNotIn("Traceback", result.output)
+                self.assertIn("Invalid value for '-W' / '--workers'", result.output)
+            with patch.dict(os.environ, {"BLACK_NUM_WORKERS": "2"}):
+                result = BlackRunner().invoke(
+                    black.main,
+                    ["--no-cache", "--check", td],
+                    catch_exceptions=False,
+                )
+            self.assertEqual(result.exit_code, 0, msg=result.output)
+
+    def test_workers_env_validation_in_library(self) -> None:
+        """Non-Click callers get a plain ValueError, not a Click exception."""
+        from black.concurrency import (
+            reformat_many,
+            validate_workers,
+            workers_from_environment,
+        )
+
+        for good in [1, 2, "3"]:
+            self.assertEqual(validate_workers(good), int(good))
+        for bad in ["abc", "1.5", "0", -1]:
+            with self.assertRaises(ValueError):
+                validate_workers(bad)
+        with patch.dict(os.environ, {"BLACK_NUM_WORKERS": "abc"}):
+            with self.assertRaises(ValueError):
+                workers_from_environment()
+            with self.assertRaises(ValueError):
+                reformat_many(
+                    set(), False, black.WriteBack.NO, black.Mode(), Report(), None
+                )
+        with patch.dict(os.environ, {"BLACK_NUM_WORKERS": "0"}):
+            with self.assertRaises(ValueError):
+                workers_from_environment()
+        with patch.dict(os.environ, clear=True):
+            self.assertGreaterEqual(workers_from_environment(), 1)
+
     def test_required_version_matches_version(self) -> None:
         self.invokeBlack(
             ["--required-version", black.__version__, "-c", "0"],

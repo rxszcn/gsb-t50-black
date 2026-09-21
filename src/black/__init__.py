@@ -253,6 +253,26 @@ def validate_regex(
         raise click.BadParameter(f"Not a valid regular expression: {e}") from None
 
 
+class WorkersParamType(click.ParamType):
+    """Click adapter for black.concurrency.validate_workers.
+
+    Keeps the wording identical to the former ``click.IntRange(min=1)`` while
+    sharing the single validation rule used by the other entry points.
+    """
+
+    name = "integer range"
+
+    def convert(
+        self, value: Any, param: click.Parameter | None, ctx: click.Context | None
+    ) -> int:
+        from black.concurrency import validate_workers
+
+        try:
+            return validate_workers(value)
+        except ValueError as e:
+            self.fail(str(e), param, ctx)
+
+
 @click.command(
     context_settings={"help_option_names": ["-h", "--help"]},
     # While Click does set this field automatically using the docstring, mypyc
@@ -468,7 +488,7 @@ def validate_regex(
 @click.option(
     "-W",
     "--workers",
-    type=click.IntRange(min=1),
+    type=WorkersParamType(),
     default=None,
     help=(
         "When Black formats multiple files, it may use a process pool to speed up"
@@ -736,11 +756,21 @@ def main(
                 no_cache=no_cache,
             )
         else:
-            from black.concurrency import reformat_many
+            from black.concurrency import reformat_many, workers_from_environment
 
             if lines:
                 err("Cannot use --line-ranges to format multiple files.")
                 ctx.exit(1)
+            if workers is None:
+                try:
+                    workers_from_environment()
+                except ValueError as e:
+                    workers_param = next(
+                        p for p in ctx.command.params if p.name == "workers"
+                    )
+                    raise click.BadParameter(
+                        str(e), ctx=ctx, param=workers_param
+                    ) from None
             reformat_many(
                 sources=sources,
                 fast=fast,

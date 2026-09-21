@@ -74,6 +74,35 @@ def shutdown(loop: asyncio.AbstractEventLoop) -> None:
         loop.close()
 
 
+def validate_workers(value: object) -> int:
+    """Validate a worker count coming from any entry point (CLI, config, env).
+
+    Raises a plain ``ValueError`` so non-Click callers aren't exposed to
+    Click-specific exceptions. The wording mirrors Click's ``IntRange`` so the
+    Click-facing entry points can surface identical error messages.
+    """
+    try:
+        workers = int(value)  # type: ignore[arg-type]
+    except (TypeError, ValueError):
+        raise ValueError(f"{value!r} is not a valid integer range.") from None
+    if workers < 1:
+        raise ValueError(f"{workers} is not in the range x>=1.")
+    return workers
+
+
+def workers_from_environment() -> int:
+    """Read the worker count from the ``BLACK_NUM_WORKERS`` environment variable.
+
+    If the variable is unset, fall back to the number of available CPUs (and
+    then one). A set-but-invalid value is rejected via
+    :func:`validate_workers` instead of being silently ignored.
+    """
+    value = os.environ.get("BLACK_NUM_WORKERS")
+    if value is None:
+        return os.cpu_count() or 1
+    return validate_workers(value)
+
+
 # diff-shades depends on being to monkeypatch this function to operate. I know it's
 # not ideal, but this shouldn't cause any issues ... hopefully. ~ichard26
 @mypyc_attr(patchable=True)
@@ -89,8 +118,7 @@ def reformat_many(
     """Reformat multiple files using a ProcessPoolExecutor."""
 
     if workers is None:
-        workers = int(os.environ.get("BLACK_NUM_WORKERS", 0))
-        workers = workers or os.cpu_count() or 1
+        workers = workers_from_environment()
     if sys.platform == "win32":
         # Work around https://bugs.python.org/issue26903
         workers = min(workers, 60)
